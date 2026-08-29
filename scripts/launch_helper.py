@@ -14,21 +14,23 @@ def launch(cmd_or_id, target_ws=None):
 
     cmd = cmd_or_id.strip()
 
-    # Check if a .desktop file exists with this name or base id
     dirs = [
         Path("/usr/share/applications"),
         Path.home() / ".local" / "share" / "applications",
     ]
     is_desktop = False
     desktop_name = cmd
+
+    # Case-insensitive desktop search
     for d in dirs:
-        if (d / f"{cmd}.desktop").exists():
-            is_desktop = True
-            desktop_name = cmd
-            break
-        elif (d / f"{cmd.lower()}.desktop").exists():
-            is_desktop = True
-            desktop_name = cmd.lower()
+        if not d.exists():
+            continue
+        for f in d.glob("*.desktop"):
+            if f.stem.lower() == cmd.lower():
+                is_desktop = True
+                desktop_name = f.stem
+                break
+        if is_desktop:
             break
 
     try:
@@ -40,7 +42,7 @@ def launch(cmd_or_id, target_ws=None):
         print(f"Error launching {cmd}: {e}", file=sys.stderr)
 
     if target_ws:
-        time.sleep(1.0)
+        time.sleep(1.2)
         try:
             subprocess.run(["/usr/bin/python3", str(APPLY_NOW_PATH)], capture_output=True, timeout=5)
         except Exception:

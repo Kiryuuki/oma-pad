@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Apply OmaPad workspace rules to all currently running windows in Hyprland.
-Uses Hyprland address dispatching for 100% reliable window movement across workspaces.
+Uses Hyprland address dispatching with specific-rule priority so terminal apps
+(like btop) are not hijacked by generic terminal rules (like Ghostty).
 """
 
 import json
@@ -12,6 +13,7 @@ import sys
 from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".config" / "omarchy" / "launchpad.json"
+GENERIC_TERMINALS = {"com.mitchellh.ghostty", "kitty", "foot", "alacritty", "ghostty"}
 
 
 def get_hyprland_clients():
@@ -57,8 +59,22 @@ def main():
     clients = get_hyprland_clients()
     moved = 0
     skipped = 0
+    claimed_addresses = set()
+
+    # Sort entries: Specific rules (title/app match) first, generic terminal rules last!
+    specific_entries = []
+    generic_entries = []
 
     for e in entries:
+        m = str(e.get("match", "")).strip()
+        if m.lower() in GENERIC_TERMINALS:
+            generic_entries.append(e)
+        else:
+            specific_entries.append(e)
+
+    sorted_entries = specific_entries + generic_entries
+
+    for e in sorted_entries:
         ws = e.get("workspace")
         match = str(e.get("match", "")).strip()
         if not ws or not match:
@@ -71,9 +87,13 @@ def main():
         silent = bool(e.get("silent", True))
 
         for c in clients:
+            addr = c.get("address")
+            if addr in claimed_addresses:
+                continue
+
             if match_window(c, match):
+                claimed_addresses.add(addr)
                 c_ws = c.get("workspace", {}).get("id")
-                addr = c.get("address")
                 if c_ws != ws_int and addr:
                     move_window_to_workspace(addr, ws_int, silent=silent)
                     moved += 1

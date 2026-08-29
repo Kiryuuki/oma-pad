@@ -120,13 +120,13 @@ Panel {
     showNotice(qsTr("Pinned all active windows to their current workspaces!"))
   }
 
-  function pinWindow(className, title, wsId, atBoot) {
+  function pinWindow(className, title, wsId, atBoot, cmd) {
     var args = [
       "--pin-window",
       "--class-name", className,
       "--app-title", title || className,
       "--workspace", String(wsId),
-      "--command", className.toLowerCase()
+      "--command", cmd || className.toLowerCase()
     ]
     if (atBoot) args.push("--launch-at-boot")
     runEngine(args)
@@ -994,7 +994,7 @@ Panel {
                         var m = root.pickedApp.match || root.pickedApp.id
                         var name = root.pickedApp.name || m
                         var cmd = root.pickedApp.command || m
-                        root.pinWindow(m, name, root.targetWorkspace, root.flagLaunchAtBoot)
+                        root.pinWindow(m, name, root.targetWorkspace, root.flagLaunchAtBoot, cmd)
                         root.pickedApp = null
                         root.activeTab = "workspaces"
                       }

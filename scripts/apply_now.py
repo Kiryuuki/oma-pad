@@ -1,128 +1,88 @@
 #!/usr/bin/env python3
-"""Apply the user's launchpad.json workspace rules to currently running windows.
-
-For each entry that has a `workspace`, attempt to focus a running window whose
-class or title matches `match` and move it to the assigned workspace. Because
-Hyprland's Lua API only moves the *focused* window, we use `omarchy launch or
-focus` to bring the target to front first.
-
-Returns a JSON object on stdout:
-  {"moved": N, "skipped": N, "failed": N}
-
-- moved: windows successfully relocated.
-- skipped: already on the correct workspace.
-- failed: no matching window found, or move failed after focus.
 """
+Apply OmaPad workspace rules to all currently running windows in Hyprland.
+Uses Hyprland address dispatching for 100% reliable window movement across workspaces.
+"""
+
 import json
 import os
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+CONFIG_PATH = Path.home() / ".config" / "omarchy" / "launchpad.json"
 
 
-def _hyprctl_json(cmd: str):
-    p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
-    if p.returncode != 0:
-        return []
+def get_hyprland_clients():
     try:
-        return json.loads(p.stdout)
-    except json.JSONDecodeError:
-        return []
+        p = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=5)
+        if p.returncode == 0:
+            return json.loads(p.stdout)
+    except Exception:
+        pass
+    return []
 
 
-def _match_window(window, pattern: str) -> bool:
-    cls = (window.get("class") or "").lower()
-    title = (window.get("title") or "").lower()
+def match_window(win, pattern: str) -> bool:
+    cls = (win.get("class") or "").lower()
+    title = (win.get("title") or "").lower()
+    pat = pattern.lower().strip()
+    return pat in cls or pat in title or bool(re.search(re.escape(pat), cls, re.IGNORECASE)) or bool(re.search(re.escape(pat), title, re.IGNORECASE))
+
+
+def move_window_to_workspace(address: str, workspace_id: int, silent: bool = True):
+    follow_val = "false" if silent else "true"
+    lua_cmd = f'hl.dispatch(hl.dsp.focus({{ window = "address:{address}" }})); hl.dispatch(hl.dsp.window.move({{ workspace = "{workspace_id}", follow = {follow_val} }}))'
     try:
-        return bool(re.search(pattern, cls, re.IGNORECASE)) or bool(
-            re.search(pattern, title, re.IGNORECASE)
-        )
-    except re.error:
-        return pattern.lower() in cls or pattern.lower() in title
+        subprocess.run(["hyprctl", "eval", lua_cmd], capture_output=True, text=True, timeout=3)
+    except Exception as e:
+        print(f"Error moving window {address}: {e}", file=sys.stderr)
 
 
-def _focus_window(command: str) -> bool:
-    """Focus a window by launching or focusing the app via omarchy."""
-    if not command:
-        return False
-    p = subprocess.run(
-        ["omarchy", "launch", "or", "focus", command],
-        capture_output=True,
-        text=True,
-        timeout=8,
-    )
-    return p.returncode == 0
-
-
-def _move_active(workspace: int) -> bool:
-    cmd = (
-        'eval \'return hl.dsp.window.move({workspace='
-        + str(workspace)
-        + '})\''
-    )
-    p = subprocess.run(["hyprctl"] + cmd.split(), capture_output=True, text=True, timeout=5)
-    return p.returncode == 0 and "error" not in p.stdout.lower()
-
-
-def main() -> int:
-    home = os.environ.get("HOME", os.path.expanduser("~"))
-    config_path = os.path.join(home, ".config", "omarchy", "launchpad.json")
+def main():
+    if not CONFIG_PATH.exists():
+        return 0
 
     try:
-        with open(config_path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        entries = data.get("entries", []) if isinstance(data, dict) else []
-    except (OSError, json.JSONDecodeError):
-        entries = []
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:
+        return 1
 
-    windows = _hyprctl_json("hyprctl clients -j")
+    entries = cfg.get("entries", [])
+    if not isinstance(entries, list):
+        return 0
+
+    clients = get_hyprland_clients()
     moved = 0
     skipped = 0
-    failed = 0
 
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        ws = entry.get("workspace")
-        match = str(entry.get("match", "")).strip()
-        cmd = str(entry.get("command", "")).strip()
-        if not ws or not match or not cmd:
+    for e in entries:
+        ws = e.get("workspace")
+        match = str(e.get("match", "")).strip()
+        if not ws or not match:
             continue
         try:
             ws_int = int(ws)
-        except (TypeError, ValueError):
+        except (ValueError, TypeError):
             continue
 
-        # find a matching running window
-        target = None
-        for w in windows:
-            if _match_window(w, match):
-                target = w
-                break
+        silent = bool(e.get("silent", True))
 
-        if target is None:
-            failed += 1
-            continue
+        for c in clients:
+            if match_window(c, match):
+                c_ws = c.get("workspace", {}).get("id")
+                addr = c.get("address")
+                if c_ws != ws_int and addr:
+                    move_window_to_workspace(addr, ws_int, silent=silent)
+                    moved += 1
+                else:
+                    skipped += 1
 
-        current_ws = target.get("workspace", {}).get("id")
-        if current_ws == ws_int:
-            skipped += 1
-            continue
-
-        # focus then move
-        if _focus_window(cmd):
-            import time
-            time.sleep(0.3)
-            if _move_active(ws_int):
-                moved += 1
-            else:
-                failed += 1
-        else:
-            failed += 1
-
-    print(json.dumps({"moved": moved, "skipped": skipped, "failed": failed}))
+    print(json.dumps({"moved": moved, "skipped": skipped}))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

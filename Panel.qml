@@ -22,15 +22,14 @@ Panel {
   property bool addFormOpen: false
   property string statusNotice: ""
   property string appSearchFilter: ""
-  property bool showAppDropdown: false
 
-  // Selected / active form state
-  property string formAppId: ""
-  property string formMatch: ""
-  property string formCommand: ""
-  property int formWorkspace: 1
-  property bool formLaunchAtBoot: false
-  property bool formSilent: false
+  // Form selection state
+  property string selectedAppName: ""
+  property string selectedAppMatch: ""
+  property string selectedAppCommand: ""
+  property int selectedWorkspace: 1
+  property bool selectedLaunchAtBoot: false
+  property bool selectedSilent: false
   property bool showAdvancedFields: false
 
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
@@ -43,7 +42,6 @@ Panel {
 
   function close() {
     root.addFormOpen = false
-    root.showAppDropdown = false
     root.controller.hide()
   }
 
@@ -156,22 +154,19 @@ Panel {
   }
 
   function selectApp(app) {
-    root.formAppId = app.name || app.id
-    root.formMatch = app.match || app.id
-    root.formCommand = app.command || app.id
-    root.appSearchFilter = app.name || app.id
-    root.showAppDropdown = false
+    root.selectedAppName = app.name || app.id
+    root.selectedAppMatch = app.match || app.id
+    root.selectedAppCommand = app.command || app.id
   }
 
   function resetForm() {
-    root.formAppId = ""
-    root.formMatch = ""
-    root.formCommand = ""
+    root.selectedAppName = ""
+    root.selectedAppMatch = ""
+    root.selectedAppCommand = ""
     root.appSearchFilter = ""
-    root.formWorkspace = 1
-    root.formLaunchAtBoot = false
-    root.formSilent = false
-    root.showAppDropdown = false
+    root.selectedWorkspace = 1
+    root.selectedLaunchAtBoot = false
+    root.selectedSilent = false
     root.showAdvancedFields = false
   }
 
@@ -186,14 +181,15 @@ Panel {
     onTriggered: root.statusNotice = ""
   }
 
-  // Filtered Apps List for Dropdown
+  // Filtered Apps List for App Selector
   readonly property var filteredApps: {
     if (!root.availableApps) return []
     var q = root.appSearchFilter.toLowerCase().trim()
     if (!q) return root.availableApps.slice(0, 15)
     return root.availableApps.filter(function(a) {
       return (a.name && a.name.toLowerCase().indexOf(q) !== -1) ||
-             (a.match && a.match.toLowerCase().indexOf(q) !== -1)
+             (a.match && a.match.toLowerCase().indexOf(q) !== -1) ||
+             (a.command && a.command.toLowerCase().indexOf(q) !== -1)
     }).slice(0, 20)
   }
 
@@ -302,13 +298,13 @@ Panel {
             }
           }
 
-          // ------------------ ADD / EDIT RULE FORM (DROPDOWN DRIVEN) ------------------
+          // ------------------ ADD APP FORM ------------------
           BorderSurface {
             visible: root.addFormOpen
             width: parent.width
             implicitHeight: formCol.implicitHeight + Style.space(14)
             radius: Style.cornerRadius
-            color: Style.hoverFillFor(root.foreground, root.foreground)
+            color: Style.hoverFillFor(root.contentForeground, root.contentForeground)
             borderSpec: Border.controlSpec("focus", Color.accent, Color.accent)
 
             Column {
@@ -328,142 +324,176 @@ Panel {
                 font.letterSpacing: 1
               }
 
-              // Step 1: Searchable App Dropdown Selector
+              // ---------------- STEP 1: APP SELECTOR ----------------
               Column {
                 width: parent.width
-                spacing: 2
+                spacing: Style.space(4)
 
                 Text {
-                  text: qsTr("1. Select Application (search running or installed apps)")
+                  text: qsTr("1. Select Application")
                   color: Qt.darker(root.contentForeground, 1.8)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
+                  font.bold: true
                 }
 
+                // Selected App Banner (if chosen)
                 BorderSurface {
+                  visible: root.selectedAppMatch !== ""
                   width: parent.width
-                  implicitHeight: Style.space(34)
+                  implicitHeight: Style.space(32)
                   radius: Style.cornerRadius
-                  color: "transparent"
-                  borderSpec: appSearchInput.activeFocus || root.showAppDropdown
-                    ? Border.controlSpec("selected", Color.accent, Color.accent)
-                    : Border.controlSpec("normal", Qt.darker(root.contentForeground, 2.0), Color.accent)
+                  color: Qt.rgba(0.06, 0.72, 0.51, 0.15)
+                  borderSpec: Border.controlSpec("normal", "#10B981", Color.accent)
 
                   RowLayout {
                     anchors.fill: parent
-                    anchors.margins: Style.space(4)
+                    anchors.margins: Style.space(6)
                     spacing: Style.space(6)
 
                     Text {
-                      text: "🔍"
-                      font.pixelSize: Style.font.caption
-                    }
-
-                    TextInput {
-                      id: appSearchInput
-                      Layout.fillWidth: true
-                      text: root.appSearchFilter
-                      color: root.contentForeground
-                      font.family: root.contentFontFamily
-                      font.pixelSize: Style.font.bodySmall
-                      selectByMouse: true
-                      clip: true
-                      onTextChanged: {
-                        root.appSearchFilter = text
-                        root.showAppDropdown = true
-                      }
-                      onActiveFocusChanged: if (activeFocus) root.showAppDropdown = true
-
-                      Text {
-                        visible: appSearchInput.text === "" && !appSearchInput.activeFocus
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: qsTr("Click to choose an installed app (e.g. Zen, Ghostty, Discord)...")
-                        color: Qt.darker(root.contentForeground, 2.0)
-                        font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.caption
-                      }
+                      text: "✓"
+                      color: "#10B981"
+                      font.bold: true
                     }
 
                     Text {
-                      text: root.showAppDropdown ? "▲" : "▼"
-                      color: Qt.darker(root.contentForeground, 2.0)
+                      Layout.fillWidth: true
+                      text: root.selectedAppName + " (match: " + root.selectedAppMatch + ")"
+                      color: root.contentForeground
+                      font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption
+                      font.bold: true
+                      elide: Text.ElideRight
+                    }
 
+                    Text {
+                      text: qsTr("Change")
+                      color: Color.accent
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
                       MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.showAppDropdown = !root.showAppDropdown
+                        onClicked: root.selectedAppMatch = ""
                       }
                     }
                   }
                 }
 
-                // Dropdown Popover List
-                BorderSurface {
-                  visible: root.showAppDropdown && root.filteredApps.length > 0
+                // App Search Input & List (shown when no app selected or searching)
+                Column {
+                  visible: root.selectedAppMatch === ""
                   width: parent.width
-                  implicitHeight: Math.min(Style.space(160), dropCol.implicitHeight + Style.space(8))
-                  radius: Style.cornerRadius
-                  color: Style.hoverFillFor(root.contentForeground, root.contentForeground)
-                  borderSpec: Border.controlSpec("selected", Color.accent, Color.accent)
+                  spacing: Style.space(4)
 
-                  Flickable {
-                    anchors.fill: parent
-                    anchors.margins: Style.space(4)
-                    contentWidth: dropCol.width
-                    contentHeight: dropCol.implicitHeight
-                    clip: true
+                  BorderSurface {
+                    width: parent.width
+                    implicitHeight: Style.space(32)
+                    radius: Style.cornerRadius
+                    color: "transparent"
+                    borderSpec: Border.controlSpec("normal", Qt.darker(root.contentForeground, 2.0), Color.accent)
 
-                    Column {
-                      id: dropCol
-                      width: parent.width
-                      spacing: Style.space(2)
+                    RowLayout {
+                      anchors.fill: parent
+                      anchors.margins: Style.space(4)
+                      spacing: Style.space(6)
 
-                      Repeater {
-                        model: root.filteredApps
+                      Text {
+                        text: "🔍"
+                        font.pixelSize: Style.font.caption
+                      }
 
-                        delegate: Rectangle {
-                          required property var modelData
-                          width: dropCol.width
-                          implicitHeight: Style.space(26)
-                          radius: Style.space(3)
-                          color: itemHover.hovered ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12) : "transparent"
+                      TextInput {
+                        id: searchInp
+                        Layout.fillWidth: true
+                        text: root.appSearchFilter
+                        color: root.contentForeground
+                        font.family: root.contentFontFamily
+                        font.pixelSize: Style.font.bodySmall
+                        selectByMouse: true
+                        clip: true
+                        onTextChanged: root.appSearchFilter = text
 
-                          HoverHandler { id: itemHover }
+                        Text {
+                          visible: searchInp.text === "" && !searchInp.activeFocus
+                          anchors.verticalCenter: parent.verticalCenter
+                          text: qsTr("Search apps (e.g. Zen, Kitty, Code, Discord)...")
+                          color: Qt.darker(root.contentForeground, 2.0)
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                        }
+                      }
+                    }
+                  }
 
-                          RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: Style.space(4)
-                            spacing: Style.space(6)
+                  // Apps List
+                  BorderSurface {
+                    width: parent.width
+                    implicitHeight: Math.min(Style.space(140), appListCol.implicitHeight + Style.space(6))
+                    radius: Style.cornerRadius
+                    color: "transparent"
+                    borderSpec: Border.controlSpec("normal", Qt.darker(root.contentForeground, 2.2), Color.accent)
 
-                            Text {
-                              text: parent.parent.modelData.isRunning ? "󰖲" : "󰀵"
-                              color: parent.parent.modelData.isRunning ? "#87c095" : Color.accent
-                              font.pixelSize: Style.font.caption
+                    Flickable {
+                      anchors.fill: parent
+                      anchors.margins: Style.space(4)
+                      contentWidth: appListCol.width
+                      contentHeight: appListCol.implicitHeight
+                      clip: true
+
+                      Column {
+                        id: appListCol
+                        width: parent.width
+                        spacing: 2
+
+                        Repeater {
+                          model: root.filteredApps
+
+                          delegate: Rectangle {
+                            id: appItem
+                            required property var modelData
+                            width: appListCol.width
+                            implicitHeight: Style.space(26)
+                            radius: Style.space(3)
+                            color: itemHover.hovered ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12) : "transparent"
+
+                            HoverHandler { id: itemHover }
+
+                            RowLayout {
+                              anchors.fill: parent
+                              anchors.margins: Style.space(4)
+                              spacing: Style.space(6)
+
+                              Text {
+                                text: appItem.modelData.isRunning ? "󰖲" : "󰀵"
+                                color: appItem.modelData.isRunning ? "#87c095" : Color.accent
+                                font.pixelSize: Style.font.caption
+                              }
+
+                              Text {
+                                Layout.fillWidth: true
+                                text: appItem.modelData.name || appItem.modelData.id
+                                color: root.contentForeground
+                                font.family: root.contentFontFamily
+                                font.pixelSize: Style.font.caption
+                                font.bold: Boolean(appItem.modelData.isRunning)
+                                elide: Text.ElideRight
+                              }
+
+                              Text {
+                                text: "match: " + (appItem.modelData.match || "")
+                                color: Qt.darker(root.contentForeground, 2.0)
+                                font.family: root.contentFontFamily
+                                font.pixelSize: Style.font.caption
+                              }
                             }
 
-                            Text {
-                              Layout.fillWidth: true
-                              text: parent.parent.modelData.name
-                              color: root.contentForeground
-                              font.family: root.contentFontFamily
-                              font.pixelSize: Style.font.caption
-                              font.bold: parent.parent.modelData.isRunning
-                              elide: Text.ElideRight
+                            MouseArea {
+                              anchors.fill: parent
+                              cursorShape: Qt.PointingHandCursor
+                              onClicked: root.selectApp(appItem.modelData)
                             }
-
-                            Text {
-                              text: "match: " + parent.parent.modelData.match
-                              color: Qt.darker(root.contentForeground, 2.0)
-                              font.family: root.contentFontFamily
-                              font.pixelSize: Style.font.caption
-                            }
-                          }
-
-                          MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.selectApp(parent.modelData)
                           }
                         }
                       }
@@ -472,16 +502,17 @@ Panel {
                 }
               }
 
-              // Step 2: Workspace Number Selector
+              // ---------------- STEP 2: WORKSPACE SELECTOR ----------------
               Column {
                 width: parent.width
-                spacing: 2
+                spacing: Style.space(4)
 
                 Text {
                   text: qsTr("2. Assign to Workspace")
                   color: Qt.darker(root.contentForeground, 1.8)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
+                  font.bold: true
                 }
 
                 RowLayout {
@@ -491,34 +522,38 @@ Panel {
                   Repeater {
                     model: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
                     delegate: Rectangle {
+                      id: wsBtn
                       required property int modelData
-                      readonly property bool active: root.formWorkspace === modelData
+                      readonly property bool active: root.selectedWorkspace === wsBtn.modelData
+
                       Layout.fillWidth: true
-                      implicitHeight: Style.space(28)
+                      implicitHeight: Style.space(30)
                       radius: Style.cornerRadius
-                      color: active ? Color.accent : "transparent"
+                      color: wsBtn.active ? Color.accent : (wsHover.hovered ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12) : "transparent")
                       border.width: 1
-                      border.color: active ? Color.accent : Qt.darker(root.contentForeground, 2.2)
+                      border.color: wsBtn.active ? Color.accent : Qt.darker(root.contentForeground, 2.2)
+
+                      HoverHandler { id: wsHover }
 
                       Text {
                         anchors.centerIn: parent
-                        text: String(parent.modelData)
-                        color: parent.active ? "white" : Qt.darker(root.contentForeground, 1.6)
+                        text: String(wsBtn.modelData)
+                        color: wsBtn.active ? "white" : Qt.darker(root.contentForeground, 1.6)
                         font.pixelSize: Style.font.bodySmall
-                        font.bold: parent.active
+                        font.bold: wsBtn.active
                       }
 
                       MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.formWorkspace = parent.modelData
+                        onClicked: root.selectedWorkspace = wsBtn.modelData
                       }
                     }
                   }
                 }
               }
 
-              // Step 3: Toggles (Launch at Boot & Silent)
+              // ---------------- STEP 3: TOGGLES ----------------
               RowLayout {
                 width: parent.width
                 spacing: Style.space(12)
@@ -529,20 +564,20 @@ Panel {
                     implicitWidth: Style.space(18)
                     implicitHeight: Style.space(18)
                     radius: Style.space(3)
-                    color: root.formLaunchAtBoot ? Color.accent : "transparent"
-                    borderSpec: Border.controlSpec("normal", root.formLaunchAtBoot ? Color.accent : Qt.darker(root.contentForeground, 1.8), Color.accent)
+                    color: root.selectedLaunchAtBoot ? Color.accent : "transparent"
+                    borderSpec: Border.controlSpec("normal", root.selectedLaunchAtBoot ? Color.accent : Qt.darker(root.contentForeground, 1.8), Color.accent)
                     Text {
                       anchors.centerIn: parent
                       text: "✓"
                       color: "white"
-                      visible: root.formLaunchAtBoot
+                      visible: root.selectedLaunchAtBoot
                       font.pixelSize: Style.font.caption
                       font.bold: true
                     }
                     MouseArea {
                       anchors.fill: parent
                       cursorShape: Qt.PointingHandCursor
-                      onClicked: root.formLaunchAtBoot = !root.formLaunchAtBoot
+                      onClicked: root.selectedLaunchAtBoot = !root.selectedLaunchAtBoot
                     }
                   }
                   Text {
@@ -560,20 +595,20 @@ Panel {
                     implicitWidth: Style.space(18)
                     implicitHeight: Style.space(18)
                     radius: Style.space(3)
-                    color: root.formSilent ? Color.accent : "transparent"
-                    borderSpec: Border.controlSpec("normal", root.formSilent ? Color.accent : Qt.darker(root.contentForeground, 1.8), Color.accent)
+                    color: root.selectedSilent ? Color.accent : "transparent"
+                    borderSpec: Border.controlSpec("normal", root.selectedSilent ? Color.accent : Qt.darker(root.contentForeground, 1.8), Color.accent)
                     Text {
                       anchors.centerIn: parent
                       text: "✓"
                       color: "white"
-                      visible: root.formSilent
+                      visible: root.selectedSilent
                       font.pixelSize: Style.font.caption
                       font.bold: true
                     }
                     MouseArea {
                       anchors.fill: parent
                       cursorShape: Qt.PointingHandCursor
-                      onClicked: root.formSilent = !root.formSilent
+                      onClicked: root.selectedSilent = !root.selectedSilent
                     }
                   }
                   Text {
@@ -588,7 +623,7 @@ Panel {
                 Item { Layout.fillWidth: true }
 
                 Text {
-                  text: root.showAdvancedFields ? qsTr("Hide Advanced ▲") : qsTr("Edit Match / Command ▼")
+                  text: root.showAdvancedFields ? qsTr("Hide Advanced ▲") : qsTr("Edit Match / Exec ▼")
                   color: Qt.darker(root.contentForeground, 1.8)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
@@ -601,7 +636,7 @@ Panel {
                 }
               }
 
-              // Optional Advanced Inputs (Match / Custom Exec)
+              // Optional Advanced Inputs
               Column {
                 visible: root.showAdvancedFields
                 width: parent.width
@@ -621,13 +656,13 @@ Panel {
                     TextInput {
                       anchors.fill: parent
                       anchors.margins: Style.space(4)
-                      text: root.formMatch
+                      text: root.selectedAppMatch
                       color: root.contentForeground
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption
                       selectByMouse: true
                       clip: true
-                      onTextChanged: root.formMatch = text
+                      onTextChanged: root.selectedAppMatch = text
                     }
                   }
 
@@ -641,19 +676,19 @@ Panel {
                     TextInput {
                       anchors.fill: parent
                       anchors.margins: Style.space(4)
-                      text: root.formCommand
+                      text: root.selectedAppCommand
                       color: root.contentForeground
                       font.family: root.contentFontFamily
                       font.pixelSize: Style.font.caption
                       selectByMouse: true
                       clip: true
-                      onTextChanged: root.formCommand = text
+                      onTextChanged: root.selectedAppCommand = text
                     }
                   }
                 }
               }
 
-              // Action Buttons
+              // ---------------- ACTION BUTTONS ----------------
               RowLayout {
                 width: parent.width
                 spacing: Style.space(6)
@@ -662,7 +697,7 @@ Panel {
 
                 BorderSurface {
                   implicitWidth: Style.space(60)
-                  implicitHeight: Style.space(26)
+                  implicitHeight: Style.space(28)
                   radius: Style.cornerRadius
                   color: "transparent"
                   borderSpec: Border.controlSpec("normal", Qt.darker(root.contentForeground, 2.0), Color.accent)
@@ -686,8 +721,8 @@ Panel {
                 }
 
                 BorderSurface {
-                  implicitWidth: Style.space(90)
-                  implicitHeight: Style.space(26)
+                  implicitWidth: Style.space(100)
+                  implicitHeight: Style.space(28)
                   radius: Style.cornerRadius
                   color: Color.accent
                   borderSpec: Border.controlSpec("normal", Color.accent, Color.accent)
@@ -705,11 +740,14 @@ Panel {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                      var m = root.formMatch.trim() || root.formAppId.trim()
-                      if (!m) return
-                      var name = root.formAppId.trim() || m
-                      var cmd = root.formCommand.trim() || m
-                      root.saveRule(name, m, cmd, root.formWorkspace, root.formLaunchAtBoot, root.formSilent)
+                      var m = root.selectedAppMatch.trim() || root.selectedAppName.trim()
+                      if (!m) {
+                        root.showNotice(qsTr("Please select an application first!"))
+                        return
+                      }
+                      var name = root.selectedAppName.trim() || m
+                      var cmd = root.selectedAppCommand.trim() || m
+                      root.saveRule(name, m, cmd, root.selectedWorkspace, root.selectedLaunchAtBoot, root.selectedSilent)
                     }
                   }
                 }

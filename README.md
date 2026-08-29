@@ -1,31 +1,72 @@
-# OmaPad — App-to-Workspace & Auto-Launch Manager for Omarchy
+# OmaPad: App-to-Workspace and Auto-Launch Manager for Omarchy
 
-Declaratively pin apps to Hyprland workspaces and optionally auto-launch them at boot, driven entirely by a single config file and a searchable in-panel application picker.
+Declaratively pin applications to Hyprland workspaces and auto-launch them at boot, driven by an interactive application picker and live workspace inspector.
 
----
-
-## 🌟 Features
-
-- **🎯 Searchable App Dropdown**: Discovers all installed `.desktop` applications and running windows automatically so you don't have to guess window class matches or execution commands.
-- **📌 Workspace Pinning**: Assign apps to workspaces 1 through 10.
-- **🚀 Boot Launching**: Toggle `Auto-launch at boot` on any app rule.
-- **🔇 Silent Pinning**: Open apps in designated workspaces without pulling focus away from your current workspace.
-- **⚡ Instant Repositioning (`󰵱` / `M`)**: 1-click button to move all currently open windows to their assigned workspaces.
-- **🔄 Zero Hand-Editing**: Generates `~/.config/hypr/launchpad.lua` and reloads Hyprland (`hyprctl reload`) cleanly.
+![OmaPad Main View](assets/oma-pad-preview1.png)
 
 ---
 
-## ⌨️ Keyboard Shortcuts
+## Features
+
+- **Live Workspace Inspector and 1-Click Pinning**:
+  - Automatically discovers all active Hyprland workspaces and currently running windows.
+  - 1-click Pin Current Layout header button remembers your open windows for subsequent boots.
+  - Per-window Remember / Pin action directly inside each workspace card.
+- **Searchable Installed Applications Picker**:
+  - Scans all installed desktop applications and running windows automatically.
+  - Real-time search filter across application names, window classes, and execution commands.
+  - 1-click workspace assigner (`WS 1` through `WS 10`).
+- **Boot Launch and Silent Pinning**:
+  - 1-click interactive Boot toggle (`Boot: ON` / `Boot: OFF`) directly on pinned rule cards.
+  - Silent pinning option opens applications without pulling focus from your active workspace.
+- **Instant Repositioning (`M`)**:
+  - 1-click button and keyboard shortcut to relocate all open windows to their assigned workspaces using native Hyprland address dispatching.
+- **Zero Hand-Editing**:
+  - Automatically generates `~/.config/hypr/launchpad.lua` and reloads Hyprland cleanly.
+
+---
+
+## Previews
+
+![OmaPad Search and Rule Manager](assets/oma-pad-preview2.png)
+
+---
+
+## Keyboard Shortcuts
 
 | Key | Action |
 |---|---|
-| `a` / `A` | Open **Add App Rule** picker |
-| `r` / `R` | Re-generate rules & reload Hyprland |
-| `m` / `M` | Reposition currently open windows now |
+| `1` | Switch to Live Workspaces tab |
+| `2` | Switch to Pinned Rules tab |
+| `3` | Switch to Add / Search Apps tab |
+| `p` / `P` | Pin current open window layout |
+| `m` / `M` | Reposition open windows now |
+| `r` / `R` | Sync rules and reload Hyprland |
 | `Esc` | Close flyout |
 
 ---
 
-## 📄 License
+## Configuration
 
-MIT License © 2026 Kiryuuki
+Rules are managed in the UI and stored in `~/.config/omarchy/launchpad.json`:
+```json
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "Zen Browser",
+      "match": "zen",
+      "command": "zen",
+      "workspace": 1,
+      "launchAtBoot": true,
+      "silent": false
+    }
+  ]
+}
+```
+
+---
+
+## License
+
+MIT License (c) 2026 Kiryuuki

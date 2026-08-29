@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "kiryuuki.oma-pad",
+  "name": "OmaPad",
+  "version": "1.0.0",
+  "author": "Kiryuuki",
+  "license": "MIT",
+  "description": "App-to-Workspace pinning and boot auto-launch manager for Hyprland on Omarchy.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaPad",
+    "description": "App-to-workspace manager & launcher",
+    "category": "Tools",
+    "allowMultiple": false
+  }
+}

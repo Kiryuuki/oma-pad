@@ -2,28 +2,54 @@
 """
 OmaPad Engine for Omarchy Desktop.
 Polls live Hyprland workspaces/windows, indexes installed applications,
-manages pinned rules, and writes state atomically to ~/.local/state/omarchy/launchpad-state.json.
+manages pinned rules, and writes state atomically with bounded descriptor safety.
 """
 
 import argparse
 import configparser
 import json
 import os
+from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".config" / "omarchy" / "launchpad.json"
 STATE_PATH = Path.home() / ".local" / "state" / "omarchy" / "launchpad-state.json"
 GENERATOR_PATH = Path(__file__).parent / "generate.py"
 APPLY_NOW_PATH = Path(__file__).parent / "apply_now.py"
 
+MAX_SUBPROCESS_BYTES = 512 * 1024  # 512 KB ceiling
+MAX_STATE_BYTES = 512 * 1024       # 512 KB ceiling
+
+
+def run_bounded_subprocess(cmd, timeout=3):
+    """Runs a subprocess with strict byte ceiling and timeout, failing closed on overflow."""
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False
+        )
+        raw_out, _ = proc.communicate(timeout=timeout)
+        if len(raw_out) > MAX_SUBPROCESS_BYTES:
+            print(f"Error: Subprocess output exceeded {MAX_SUBPROCESS_BYTES} bytes limit", file=sys.stderr)
+            return None
+        return raw_out.decode("utf-8", errors="replace")
+    except Exception as e:
+        print(f"Subprocess error: {e}", file=sys.stderr)
+        return None
+
 
 def load_config():
     if not CONFIG_PATH.exists():
         return {"version": 1, "entries": []}
     try:
+        st = CONFIG_PATH.stat()
+        if st.st_uid != os.getuid() or not stat.S_ISREG(st.st_mode):
+            return {"version": 1, "entries": []}
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
             if not isinstance(data.get("entries"), list):
@@ -35,13 +61,22 @@ def load_config():
 
 def write_config(cfg):
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    raw_bytes = (json.dumps(cfg, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    if len(raw_bytes) > MAX_STATE_BYTES:
+        print(f"Error: Config size {len(raw_bytes)} exceeds ceiling {MAX_STATE_BYTES}", file=sys.stderr)
+        return
+
     handle, temp_name = tempfile.mkstemp(dir=str(CONFIG_PATH.parent), suffix=".tmp")
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump(cfg, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
+        os.fchmod(handle, 0o600)
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(raw_bytes)
             stream.flush()
             os.fsync(stream.fileno())
+        if CONFIG_PATH.exists():
+            st = CONFIG_PATH.lstat()
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+                CONFIG_PATH.unlink(missing_ok=True)
         os.replace(temp_name, CONFIG_PATH)
     except BaseException:
         Path(temp_name).unlink(missing_ok=True)
@@ -50,13 +85,22 @@ def write_config(cfg):
 
 def write_state(data):
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    raw_bytes = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    if len(raw_bytes) > MAX_STATE_BYTES:
+        print(f"Error: State size {len(raw_bytes)} exceeds ceiling {MAX_STATE_BYTES}", file=sys.stderr)
+        return
+
     handle, temp_name = tempfile.mkstemp(dir=str(STATE_PATH.parent), suffix=".tmp")
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            json.dump(data, stream, ensure_ascii=False, indent=2)
-            stream.write("\n")
+        os.fchmod(handle, 0o600)
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(raw_bytes)
             stream.flush()
             os.fsync(stream.fileno())
+        if STATE_PATH.exists():
+            st = STATE_PATH.lstat()
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+                STATE_PATH.unlink(missing_ok=True)
         os.replace(temp_name, STATE_PATH)
     except BaseException:
         Path(temp_name).unlink(missing_ok=True)
@@ -71,12 +115,14 @@ def get_live_hyprland_state(pinned_entries):
             pinned_map[m] = e
 
     clients = []
-    try:
-        p = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=3)
-        if p.returncode == 0:
-            clients = json.loads(p.stdout)
-    except Exception:
-        pass
+    out = run_bounded_subprocess(["hyprctl", "clients", "-j"], timeout=3)
+    if out:
+        try:
+            parsed = json.loads(out)
+            if isinstance(parsed, list):
+                clients = parsed
+        except Exception:
+            pass
 
     workspaces_data = []
     occupied_ws = set()
@@ -94,9 +140,9 @@ def get_live_hyprland_state(pinned_entries):
         for c in clients:
             c_ws = c.get("workspace", {}).get("id", 1)
             if c_ws == w_id:
-                cls = c.get("class", "").strip()
-                title = c.get("title", "").strip()
-                pid = c.get("pid", 0)
+                cls = str(c.get("class", "")).strip()
+                title = str(c.get("title", "")).strip()
+                pid = int(c.get("pid", 0))
 
                 is_pinned = False
                 matched_rule = None
@@ -126,200 +172,185 @@ def get_live_hyprland_state(pinned_entries):
     return workspaces_data, clients
 
 
-def get_installed_apps():
-    home = os.environ.get("HOME", os.path.expanduser("~"))
-    dirs = [
-        "/usr/share/applications",
-        os.path.join(home, ".local", "share", "applications"),
+def get_installed_applications():
+    search_paths = [
+        Path("/usr/share/applications"),
+        Path.home() / ".local" / "share" / "applications",
     ]
-    seen = {}
 
-    for directory in dirs:
-        if not os.path.isdir(directory):
+    apps = {}
+    for sp in search_paths:
+        if not sp.exists():
             continue
-        try:
-            entries = os.listdir(directory)
-        except OSError:
-            continue
-
-        for entry in entries:
-            if not entry.endswith(".desktop"):
-                continue
-            path = os.path.join(directory, entry)
-            cp = configparser.ConfigParser(interpolation=None)
+        for desktop_file in sp.glob("*.desktop"):
             try:
-                with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                    cp.read_file(fh)
+                cp = configparser.RawConfigParser(interpolation=None)
+                cp.read(desktop_file, encoding="utf-8", errors="ignore")
+                if not cp.has_section("Desktop Entry"):
+                    continue
+
+                entry = cp["Desktop Entry"]
+                if entry.get("NoDisplay", "false").lower() == "true":
+                    continue
+                if entry.get("Type", "Application") != "Application":
+                    continue
+
+                name = entry.get("Name", desktop_file.stem).strip()
+                exec_cmd = entry.get("Exec", "").strip()
+                icon = entry.get("Icon", "").strip()
+                comment = entry.get("Comment", "").strip()
+                wm_class = entry.get("StartupWMClass", "").strip()
+
+                if not exec_cmd or not name:
+                    continue
+
+                clean_exec = exec_cmd.split("%")[0].strip()
+                app_id = desktop_file.stem
+
+                if app_id not in apps:
+                    apps[app_id] = {
+                        "id": app_id,
+                        "name": name,
+                        "exec": clean_exec,
+                        "icon": icon or "application-x-executable",
+                        "comment": comment,
+                        "wmClass": wm_class or app_id,
+                        "desktopFile": str(desktop_file)
+                    }
             except Exception:
                 continue
 
-            sec = None
-            for s in ["Desktop Entry", "Desktop Action"]:
-                if s in cp:
-                    sec = cp[s]
-                    break
-            if sec is None and cp.sections():
-                sec = cp[cp.sections()[0]]
-            if sec is None:
-                continue
-
-            name = sec.get("Name", "").strip()
-            no_display = sec.get("NoDisplay", "false").strip().lower()
-            if not name or no_display == "true":
-                continue
-
-            exec_val = sec.get("Exec", "").strip()
-            if "%" in exec_val:
-                exec_val = exec_val.split("%")[0].strip()
-
-            base_id = entry[:-8]
-            wm_class = sec.get("StartupWMClass", "").strip()
-            match_class = wm_class or base_id
-            icon = sec.get("Icon", "").strip()
-
-            key = name.lower()
-            if key not in seen:
-                seen[key] = {
-                    "id": base_id,
-                    "name": name,
-                    "match": match_class,
-                    "command": exec_val or base_id,
-                    "icon": icon,
-                }
-
-    return sorted(seen.values(), key=lambda x: x["name"].lower())
+    sorted_apps = sorted(apps.values(), key=lambda x: x["name"].lower())
+    return sorted_apps[:250]
 
 
-def reload_hyprland_rules():
-    try:
-        subprocess.run(["/usr/bin/python3", str(GENERATOR_PATH)], capture_output=True, timeout=5)
-    except Exception as e:
-        print(f"Error regenerating rules: {e}", file=sys.stderr)
-
-
-def sync():
+def sync_state():
     cfg = load_config()
-    entries = cfg.get("entries", [])
-    workspaces, clients = get_live_hyprland_state(entries)
-    apps = get_installed_apps()
+    pinned_entries = cfg.get("entries", [])
+    workspaces, clients = get_live_hyprland_state(pinned_entries)
+    apps = get_installed_applications()
 
     state = {
         "version": 1,
-        "entries": entries,
+        "entries": pinned_entries,
         "workspaces": workspaces,
         "installedApps": apps,
-        "totalPinned": len(entries),
+        "totalPinned": len(pinned_entries),
         "totalRunningWindows": len(clients),
     }
-
     write_state(state)
-    print(f"OmaPad synced: {len(workspaces)} workspaces, {len(entries)} pinned rules, {len(apps)} installed apps")
+    print(f"OmaPad state synced: {len(pinned_entries)} pinned, {len(workspaces)} workspaces, {len(apps)} apps")
+    return state
+
+
+def add_pin(name, match, workspace, launch_at_boot=False, silent=False):
+    cfg = load_config()
+    entries = cfg.get("entries", [])
+
+    match_clean = str(match).strip()
+    entries = [e for e in entries if str(e.get("match", "")).strip().lower() != match_clean.lower()]
+
+    entries.append({
+        "name": str(name).strip() or match_clean,
+        "match": match_clean,
+        "workspace": int(workspace),
+        "launchAtBoot": bool(launch_at_boot),
+        "silent": bool(silent)
+    })
+
+    cfg["entries"] = entries
+    write_config(cfg)
+
+    if GENERATOR_PATH.exists():
+        run_bounded_subprocess(["python3", str(GENERATOR_PATH)], timeout=3)
+    if APPLY_NOW_PATH.exists():
+        run_bounded_subprocess(["python3", str(APPLY_NOW_PATH)], timeout=3)
+
+    sync_state()
+    return {"ok": True, "entries": entries}
+
+
+def remove_pin(match):
+    cfg = load_config()
+    entries = cfg.get("entries", [])
+    match_clean = str(match).strip().lower()
+    entries = [e for e in entries if str(e.get("match", "")).strip().lower() != match_clean]
+
+    cfg["entries"] = entries
+    write_config(cfg)
+
+    if GENERATOR_PATH.exists():
+        run_bounded_subprocess(["python3", str(GENERATOR_PATH)], timeout=3)
+
+    sync_state()
+    return {"ok": True, "entries": entries}
+
+
+def update_pin(match, workspace=None, launch_at_boot=None, silent=None):
+    cfg = load_config()
+    entries = cfg.get("entries", [])
+    match_clean = str(match).strip().lower()
+
+    found = False
+    for e in entries:
+        if str(e.get("match", "")).strip().lower() == match_clean:
+            if workspace is not None:
+                e["workspace"] = int(workspace)
+            if launch_at_boot is not None:
+                e["launchAtBoot"] = bool(launch_at_boot)
+            if silent is not None:
+                e["silent"] = bool(silent)
+            found = True
+            break
+
+    if not found:
+        return {"ok": False, "error": f"Rule matching '{match}' not found"}
+
+    cfg["entries"] = entries
+    write_config(cfg)
+
+    if GENERATOR_PATH.exists():
+        run_bounded_subprocess(["python3", str(GENERATOR_PATH)], timeout=3)
+    if APPLY_NOW_PATH.exists():
+        run_bounded_subprocess(["python3", str(APPLY_NOW_PATH)], timeout=3)
+
+    sync_state()
+    return {"ok": True, "entries": entries}
 
 
 def main():
     parser = argparse.ArgumentParser(description="OmaPad Engine")
-    parser.add_argument("--sync", action="store_true", help="Sync full state")
-    parser.add_argument("--pin-current-windows", action="store_true", help="Pin all currently open windows to their current workspaces")
-    parser.add_argument("--pin-window", action="store_true", help="Pin a specific window to a workspace")
-    parser.add_argument("--class-name", default="", help="Window class name")
-    parser.add_argument("--app-title", default="", help="App title")
-    parser.add_argument("--workspace", type=int, default=1, help="Workspace number")
-    parser.add_argument("--command", default="", help="Launch command")
-    parser.add_argument("--launch-at-boot", action="store_true", help="Auto launch at boot")
-    parser.add_argument("--silent", action="store_true", help="Silent pinning")
-    parser.add_argument("--toggle-boot", default="", help="Toggle launchAtBoot for a rule by match or id")
-    parser.add_argument("--set-workspace", default="", help="Update workspace for a rule by match or id")
-    parser.add_argument("--delete-rule", default="", help="Delete rule by match or id")
-    parser.add_argument("--apply-now", action="store_true", help="Reposition open windows")
-
+    parser.add_argument("--sync", action="store_true", help="Sync state and live Hyprland windows")
+    parser.add_argument("--add", action="store_true", help="Add or update a pinned rule")
+    parser.add_argument("--remove", action="store_true", help="Remove a pinned rule")
+    parser.add_argument("--update", action="store_true", help="Update existing pinned rule properties")
+    parser.add_argument("--apply-now", action="store_true", help="Dispatch running windows to workspaces")
+    parser.add_argument("--name", default="")
+    parser.add_argument("--match", default="")
+    parser.add_argument("--workspace", type=int, default=1)
+    parser.add_argument("--launch-at-boot", action="store_true")
+    parser.add_argument("--silent", action="store_true")
+    parser.add_argument("--boot-toggle", default="")
     args = parser.parse_args()
 
-    if args.pin_current_windows:
-        cfg = load_config()
-        entries = cfg.get("entries", [])
-        _, clients = get_live_hyprland_state(entries)
-        existing_matches = {e.get("match") for e in entries}
-
-        for c in clients:
-            cls = c.get("class", "").strip()
-            ws = c.get("workspace", {}).get("id", 1)
-            title = c.get("title", "").strip()
-            if not cls or cls in existing_matches:
-                continue
-            entries.append({
-                "id": cls,
-                "match": cls,
-                "command": cls.lower(),
-                "workspace": ws,
-                "launchAtBoot": False,
-                "silent": False
-            })
-            existing_matches.add(cls)
-
-        cfg["entries"] = entries
-        write_config(cfg)
-        reload_hyprland_rules()
-        sync()
-    elif args.toggle_boot:
-        target = args.toggle_boot.strip()
-        cfg = load_config()
-        entries = cfg.get("entries", [])
-        for e in entries:
-            if e.get("match") == target or e.get("id") == target:
-                e["launchAtBoot"] = not bool(e.get("launchAtBoot", False))
-                break
-        cfg["entries"] = entries
-        write_config(cfg)
-        reload_hyprland_rules()
-        sync()
-    elif args.set_workspace:
-        target = args.set_workspace.strip()
-        cfg = load_config()
-        entries = cfg.get("entries", [])
-        for e in entries:
-            if e.get("match") == target or e.get("id") == target:
-                e["workspace"] = args.workspace
-                break
-        cfg["entries"] = entries
-        write_config(cfg)
-        reload_hyprland_rules()
-        sync()
-    elif args.pin_window or (args.class_name.strip() and not args.delete_rule):
-        cfg = load_config()
-        entries = cfg.get("entries", [])
-        match_str = args.class_name.strip()
-        app_name = args.app_title.strip() or match_str
-        cmd_str = args.command.strip() or match_str
-
-        entries = [e for e in entries if e.get("match") != match_str]
-        entries.append({
-            "id": app_name,
-            "match": match_str,
-            "command": cmd_str,
-            "workspace": args.workspace,
-            "launchAtBoot": args.launch_at_boot,
-            "silent": args.silent
-        })
-        cfg["entries"] = entries
-        write_config(cfg)
-        reload_hyprland_rules()
-        sync()
-    elif args.delete_rule:
-        target = args.delete_rule.strip()
-        cfg = load_config()
-        entries = [e for e in cfg.get("entries", []) if e.get("match") != target and e.get("id") != target]
-        cfg["entries"] = entries
-        write_config(cfg)
-        reload_hyprland_rules()
-        sync()
+    if args.add:
+        res = add_pin(args.name, args.match, args.workspace, args.launch_at_boot, args.silent)
+        print(json.dumps(res))
+    elif args.remove:
+        res = remove_pin(args.match)
+        print(json.dumps(res))
+    elif args.update:
+        b_val = None
+        if args.boot_toggle:
+            b_val = args.boot_toggle.lower() in ("true", "1", "yes")
+        res = update_pin(args.match, args.workspace if args.workspace else None, b_val, None)
+        print(json.dumps(res))
     elif args.apply_now:
-        try:
-            subprocess.run(["/usr/bin/python3", str(APPLY_NOW_PATH)], capture_output=True, timeout=5)
-        except Exception:
-            pass
-        sync()
+        if APPLY_NOW_PATH.exists():
+            run_bounded_subprocess(["python3", str(APPLY_NOW_PATH)], timeout=5)
+        sync_state()
     else:
-        sync()
+        sync_state()
 
 
 if __name__ == "__main__":

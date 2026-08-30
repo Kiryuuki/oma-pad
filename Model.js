@@ -1,7 +1,7 @@
 .pragma library
 
 function parseState(rawText) {
-  if (!rawText || typeof rawText !== "string" || !rawText.trim()) {
+  if (!rawText || typeof rawText !== "string" || !rawText.trim() || rawText.length > 524288) {
     return {
       version: 1,
       entries: [],

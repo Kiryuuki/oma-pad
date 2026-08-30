@@ -66,28 +66,38 @@ Panel {
   }
 
   // =========================================================================
-  // FILE WATCHER & PROCESSES
+  // FILE WATCHER & PROCESSES (DESCRIPTOR-SAFE BOUNDED STATE PIPELINE)
   // =========================================================================
+  Process {
+    id: readStateProcess
+    command: ["/usr/bin/python3", (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/kiryuuki.oma-pad/scripts/read_state.py"]
+    stdout: StdioCollector {
+      id: stateOut
+      waitForEnd: true
+      onStreamFinished: {
+        root.stateDoc = Model.parseState(stateOut.text)
+      }
+    }
+  }
+
   FileView {
     id: stateFile
     path: (Quickshell.env("HOME") || "") + "/.local/state/omarchy/launchpad-state.json"
     watchChanges: true
     printErrors: false
-    onLoaded: {
-      root.stateDoc = Model.parseState(text())
-    }
+    onLoaded: readStateProcess.running = true
     onLoadFailed: {
       root.stateDoc = Model.parseState("")
       root.refresh()
     }
-    onFileChanged: reload()
+    onFileChanged: readStateProcess.running = true
   }
 
   Process {
     id: engineProcess
     command: ["/usr/bin/python3", (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/kiryuuki.oma-pad/scripts/launchpad_engine.py", "--sync"]
     onExited: {
-      stateFile.reload()
+      readStateProcess.running = true
     }
   }
 
@@ -223,12 +233,14 @@ Panel {
             Row {
               spacing: Style.space(6)
               Text {
+                textFormat: Text.PlainText
                 text: "\uf135"
                 color: Color.accent
                 font.pixelSize: Style.font.title
                 font.bold: true
               }
               Text {
+                textFormat: Text.PlainText
                 text: qsTr("OMAPAD")
                 color: root.contentForeground
                 font.family: root.contentFontFamily
@@ -241,6 +253,7 @@ Panel {
             Item { Layout.fillWidth: true }
 
             Text {
+              textFormat: Text.PlainText
               visible: root.statusNotice !== ""
               text: root.statusNotice
               color: "#87c095"
@@ -258,6 +271,7 @@ Panel {
               borderSpec: Border.controlSpec("normal", "#10B981", Color.accent)
 
               Text {
+                textFormat: Text.PlainText
                 id: pinAllTxt
                 anchors.centerIn: parent
                 text: "󰐃 Pin Current Layout"
@@ -322,12 +336,14 @@ Panel {
                   spacing: Style.space(4)
 
                   Text {
+                    textFormat: Text.PlainText
                     text: tabBtn.modelData.icon
                     color: tabBtn.active ? "white" : (tabHover.hovered ? root.contentForeground : Qt.darker(root.contentForeground, 1.6))
                     font.pixelSize: Style.font.caption
                   }
 
                   Text {
+                    textFormat: Text.PlainText
                     text: tabBtn.modelData.label
                     color: tabBtn.active ? "white" : (tabHover.hovered ? root.contentForeground : Qt.darker(root.contentForeground, 1.6))
                     font.family: root.contentFontFamily
@@ -386,6 +402,7 @@ Panel {
                       color: Color.accent
 
                       Text {
+                        textFormat: Text.PlainText
                         id: wsBadgeTxt
                         anchors.centerIn: parent
                         text: "WORKSPACE " + wsCard.modelData.id
@@ -397,6 +414,7 @@ Panel {
                     }
 
                     Text {
+                      textFormat: Text.PlainText
                       text: wsCard.hasWindows ? (" · " + wsCard.modelData.windows.length + " active window(s)") : " · Empty"
                       color: Qt.darker(root.contentForeground, 1.8)
                       font.family: root.contentFontFamily
@@ -406,6 +424,7 @@ Panel {
                     Item { Layout.fillWidth: true }
 
                     Text {
+                      textFormat: Text.PlainText
                       text: "+ Pin an app here"
                       color: Color.accent
                       font.family: root.contentFontFamily
@@ -443,6 +462,7 @@ Panel {
                         spacing: Style.space(6)
 
                         Text {
+                          textFormat: Text.PlainText
                           text: "󰖲"
                           color: winRow.isPinned ? "#10B981" : Color.accent
                           font.pixelSize: Style.font.caption
@@ -453,6 +473,7 @@ Panel {
                           spacing: 1
 
                           Text {
+                            textFormat: Text.PlainText
                             width: parent.width
                             text: (winRow.modelData.class || "Window") + (winRow.modelData.title ? (" — " + winRow.modelData.title) : "")
                             color: root.contentForeground
@@ -474,6 +495,7 @@ Panel {
                           HoverHandler { id: winPinHover }
 
                           Text {
+                            textFormat: Text.PlainText
                             id: pinBtnTxt
                             anchors.centerIn: parent
                             text: winRow.isPinned ? "✓ Pinned" : "󰐃 Remember / Pin"
@@ -510,6 +532,7 @@ Panel {
             spacing: Style.space(6)
 
             Text {
+              textFormat: Text.PlainText
               visible: root.entriesList.length === 0
               width: parent.width
               text: qsTr("No apps pinned to workspaces yet. Pin running windows from 'Live Workspaces' or search from 'Add / Search Apps'!")
@@ -562,6 +585,7 @@ Panel {
                       color: Color.accent
 
                       Text {
+                        textFormat: Text.PlainText
                         id: ruleWsTxt
                         anchors.centerIn: parent
                         text: "WS " + (ruleCard.modelData.workspace !== undefined ? ruleCard.modelData.workspace : "?")
@@ -585,6 +609,7 @@ Panel {
                       spacing: 1
 
                       Text {
+                        textFormat: Text.PlainText
                         width: parent.width
                         text: ruleCard.modelData.id || ruleCard.modelData.match || ""
                         color: root.contentForeground
@@ -597,6 +622,7 @@ Panel {
                       Row {
                         spacing: Style.space(6)
                         Text {
+                          textFormat: Text.PlainText
                           text: "match: " + (ruleCard.modelData.match || "")
                           color: Qt.darker(root.contentForeground, 1.8)
                           font.family: root.contentFontFamily
@@ -616,6 +642,7 @@ Panel {
                           HoverHandler { id: bootHover }
 
                           Text {
+                            textFormat: Text.PlainText
                             id: bootTag
                             anchors.centerIn: parent
                             text: ruleCard.isBoot ? "󰄲 Boot: ON" : "󰄱 Boot: OFF"
@@ -643,6 +670,7 @@ Panel {
                       color: ruleCard.isEditingWs ? Color.accent : (editHover.hovered ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12) : "transparent")
 
                       Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: "󰏫"
                         color: ruleCard.isEditingWs ? "white" : (editHover.hovered ? Color.accent : Qt.darker(root.contentForeground, 1.8))
@@ -669,6 +697,7 @@ Panel {
                       color: rLaunchHover.hovered ? Color.accent : Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08)
 
                       Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: "󰐊"
                         color: rLaunchHover.hovered ? "white" : Color.accent
@@ -692,6 +721,7 @@ Panel {
                       color: rDelHover.hovered ? "#EF4444" : "transparent"
 
                       Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: "󰆴"
                         color: rDelHover.hovered ? "white" : Qt.darker(root.contentForeground, 2.0)
@@ -714,6 +744,7 @@ Panel {
                     spacing: 2
 
                     Text {
+                      textFormat: Text.PlainText
                       text: qsTr("Assign to Workspace:")
                       color: Color.accent
                       font.family: root.contentFontFamily
@@ -740,6 +771,7 @@ Panel {
                           border.color: inlineWsBtn.active ? Color.accent : Qt.darker(root.contentForeground, 2.2)
 
                           Text {
+                            textFormat: Text.PlainText
                             anchors.centerIn: parent
                             text: String(inlineWsBtn.modelData)
                             color: inlineWsBtn.active ? "white" : Qt.darker(root.contentForeground, 1.6)
@@ -783,6 +815,7 @@ Panel {
                 spacing: Style.space(6)
 
                 Text {
+                  textFormat: Text.PlainText
                   text: "🔍"
                   font.pixelSize: Style.font.bodySmall
                 }
@@ -798,6 +831,7 @@ Panel {
                   onTextChanged: root.appSearchQuery = text
 
                   Text {
+                    textFormat: Text.PlainText
                     visible: appSearchBox.text === "" && !appSearchBox.activeFocus
                     anchors.verticalCenter: parent.verticalCenter
                     text: qsTr("Type to search installed apps (e.g. Zen, Ghostty, Code, Discord)...")
@@ -808,6 +842,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   visible: root.appSearchQuery !== ""
                   text: "✕"
                   color: Qt.darker(root.contentForeground, 1.8)
@@ -844,6 +879,7 @@ Panel {
                   width: parent.width
 
                   Text {
+                    textFormat: Text.PlainText
                     text: "✓ SELECTED: " + (root.pickedApp ? (root.pickedApp.name || "").toUpperCase() : "")
                     color: Color.accent
                     font.family: root.contentFontFamily
@@ -854,6 +890,7 @@ Panel {
                   Item { Layout.fillWidth: true }
 
                   Text {
+                    textFormat: Text.PlainText
                     text: "Cancel"
                     color: Qt.darker(root.contentForeground, 1.8)
                     font.family: root.contentFontFamily
@@ -886,6 +923,7 @@ Panel {
                       border.color: targetWsBtn.active ? Color.accent : Qt.darker(root.contentForeground, 2.2)
 
                       Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: String(targetWsBtn.modelData)
                         color: targetWsBtn.active ? "white" : Qt.darker(root.contentForeground, 1.6)
@@ -916,6 +954,7 @@ Panel {
                       color: root.flagLaunchAtBoot ? Color.accent : "transparent"
                       borderSpec: Border.controlSpec("normal", root.flagLaunchAtBoot ? Color.accent : Qt.darker(root.contentForeground, 1.8), Color.accent)
                       Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: "✓"
                         color: "white"
@@ -929,6 +968,7 @@ Panel {
                       }
                     }
                     Text {
+                      textFormat: Text.PlainText
                       anchors.verticalCenter: parent.verticalCenter
                       text: qsTr("Auto-Launch at Boot")
                       color: root.contentForeground
@@ -946,6 +986,7 @@ Panel {
                       color: root.flagSilent ? Color.accent : "transparent"
                       borderSpec: Border.controlSpec("normal", root.flagSilent ? Color.accent : Qt.darker(root.contentForeground, 1.8), Color.accent)
                       Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: "✓"
                         color: "white"
@@ -959,6 +1000,7 @@ Panel {
                       }
                     }
                     Text {
+                      textFormat: Text.PlainText
                       anchors.verticalCenter: parent.verticalCenter
                       text: qsTr("Silent Pinning")
                       color: root.contentForeground
@@ -977,6 +1019,7 @@ Panel {
                     borderSpec: Border.controlSpec("normal", Color.accent, Color.accent)
 
                     Text {
+                      textFormat: Text.PlainText
                       anchors.centerIn: parent
                       text: qsTr("Save & Pin App")
                       color: "white"
@@ -1005,6 +1048,7 @@ Panel {
 
             // Search Results List
             Text {
+              textFormat: Text.PlainText
               text: qsTr("Installed Applications (Click to select & assign workspace):")
               color: Qt.darker(root.contentForeground, 1.8)
               font.family: root.contentFontFamily
@@ -1035,6 +1079,7 @@ Panel {
                   spacing: Style.space(8)
 
                   Text {
+                    textFormat: Text.PlainText
                     text: appSearchRow.isSelected ? "✓" : "󰀵"
                     color: appSearchRow.isSelected ? "#10B981" : Color.accent
                     font.pixelSize: Style.font.caption
@@ -1042,6 +1087,7 @@ Panel {
                   }
 
                   Text {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: appSearchRow.modelData.name || appSearchRow.modelData.id
                     color: root.contentForeground
@@ -1052,6 +1098,7 @@ Panel {
                   }
 
                   Text {
+                    textFormat: Text.PlainText
                     text: "match: " + (appSearchRow.modelData.match || "")
                     color: Qt.darker(root.contentForeground, 1.8)
                     font.family: root.contentFontFamily
@@ -1065,6 +1112,7 @@ Panel {
                     color: appSearchRow.isSelected ? "#10B981" : (appSearchHover.hovered ? Qt.lighter(Color.accent, 1.1) : Color.accent)
 
                     Text {
+                      textFormat: Text.PlainText
                       id: pinTagTxt
                       anchors.centerIn: parent
                       text: appSearchRow.isSelected ? "✓ Selected" : "Select"

@@ -49,6 +49,8 @@ Panel {
     root.controller.hide()
   }
 
+  property int selectedIndex: 0
+
   function toggle() {
     if (root.opened) root.close()
     else root.open()
@@ -60,6 +62,8 @@ Panel {
 
   onOpenedChanged: {
     if (root.opened) {
+      keyCatcher.forceActiveFocus()
+      root.selectedIndex = 0
       stateFile.reload()
       refresh()
     }
@@ -201,14 +205,58 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: appSearchBox.activeFocus
       onCloseRequested: root.close()
+      onMoveRequested: function(dx, dy) {
+        if (dy !== 0) {
+          var maxIdx = 0
+          if (root.activeTab === "workspaces") maxIdx = Math.max(0, root.workspacesList.length - 1)
+          else if (root.activeTab === "rules") maxIdx = Math.max(0, root.entriesList.length - 1)
+          else if (root.activeTab === "apps") maxIdx = Math.max(0, root.searchFilteredApps.length - 1)
+          
+          root.selectedIndex = Math.max(0, Math.min(maxIdx, root.selectedIndex + dy))
+          scrollArea.contentY = Math.max(0, Math.min(scrollArea.contentHeight - scrollArea.height, root.selectedIndex * Style.space(68)))
+        }
+      }
+      onActivateRequested: {
+        if (root.activeTab === "workspaces") {
+          if (root.workspacesList && root.workspacesList[root.selectedIndex]) {
+            var ws = root.workspacesList[root.selectedIndex]
+            Quickshell.execDetached(["hyprctl", "dispatch", "workspace", String(ws.id)])
+            root.close()
+          }
+        } else if (root.activeTab === "rules") {
+          if (root.entriesList && root.entriesList[root.selectedIndex]) {
+            var r = root.entriesList[root.selectedIndex]
+            root.toggleRuleBoot(r.match)
+          }
+        } else if (root.activeTab === "apps") {
+          if (root.searchFilteredApps && root.searchFilteredApps[root.selectedIndex]) {
+            var app = root.searchFilteredApps[root.selectedIndex]
+            root.launchApp(app.exec, root.targetWorkspace)
+            root.close()
+          }
+        }
+      }
+      onDeleteRequested: {
+        if (root.activeTab === "rules") {
+          if (root.entriesList && root.entriesList[root.selectedIndex]) {
+            var r = root.entriesList[root.selectedIndex]
+            root.deleteRule(r.match)
+          }
+        }
+      }
       onTextKey: function(t) {
-        if (t === "1") root.activeTab = "workspaces"
-        else if (t === "2") root.activeTab = "rules"
-        else if (t === "3") root.activeTab = "apps"
+        if (t === "1") { root.activeTab = "workspaces"; root.selectedIndex = 0 }
+        else if (t === "2") { root.activeTab = "rules"; root.selectedIndex = 0 }
+        else if (t === "3") {
+          root.activeTab = "apps"
+          root.selectedIndex = 0
+          appSearchBox.forceActiveFocus()
+        }
         else if (t === "r" || t === "R") root.reloadRules()
         else if (t === "p" || t === "P") root.pinCurrentLayout()
-        else if (t === "m" || t === "M") root.applyNow()
+        else if (t === "m" || t === "M" || t === "a" || t === "A") root.applyNow()
       }
 
       Flickable {
@@ -375,13 +423,17 @@ Panel {
               BorderSurface {
                 id: wsCard
                 required property var modelData
+                required property int index
                 readonly property bool hasWindows: Boolean(wsCard.modelData.windows && wsCard.modelData.windows.length > 0)
+                readonly property bool isSelected: root.selectedIndex === index
 
                 width: parent.width
                 implicitHeight: wsCol.implicitHeight + Style.space(12)
                 radius: Style.cornerRadius
-                color: wsCard.hasWindows ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.04) : "transparent"
-                borderSpec: Border.controlSpec("normal", wsCard.hasWindows ? Color.accent : Qt.darker(root.contentForeground, 2.4), Color.accent)
+                color: isSelected
+                  ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.16)
+                  : (wsCard.hasWindows ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.04) : "transparent")
+                borderSpec: Border.controlSpec(isSelected ? "focus" : "normal", isSelected ? Color.accent : (wsCard.hasWindows ? Color.accent : Qt.darker(root.contentForeground, 2.4)), Color.accent)
 
                 Column {
                   id: wsCol
@@ -550,17 +602,19 @@ Panel {
               BorderSurface {
                 id: ruleCard
                 required property var modelData
+                required property int index
                 readonly property string rMatch: String(ruleCard.modelData.match || ruleCard.modelData.id || "")
                 readonly property bool isEditingWs: root.editingRuleMatch === ruleCard.rMatch
                 readonly property bool isBoot: Boolean(ruleCard.modelData.launchAtBoot)
+                readonly property bool isSelected: root.selectedIndex === index
 
                 width: parent.width
                 implicitHeight: rCardCol.implicitHeight + Style.space(12)
                 radius: Style.cornerRadius
-                color: ruleHover.hovered
-                  ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08)
-                  : Style.hoverFillFor(root.contentForeground, root.contentForeground)
-                borderSpec: Border.controlSpec("normal", Qt.darker(root.contentForeground, 2.0), Color.accent)
+                color: isSelected
+                  ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.16)
+                  : (ruleHover.hovered ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08) : Style.hoverFillFor(root.contentForeground, root.contentForeground))
+                borderSpec: Border.controlSpec(isSelected ? "focus" : "normal", isSelected ? Color.accent : Qt.darker(root.contentForeground, 2.0), Color.accent)
 
                 HoverHandler { id: ruleHover }
 
@@ -828,7 +882,38 @@ Panel {
                   font.pixelSize: Style.font.bodySmall
                   selectByMouse: true
                   clip: true
-                  onTextChanged: root.appSearchQuery = text
+                  onTextChanged: {
+                    root.appSearchQuery = text
+                    root.selectedIndex = 0
+                  }
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Escape) {
+                      if (appSearchBox.text !== "") {
+                        appSearchBox.text = ""
+                        root.appSearchQuery = ""
+                      } else {
+                        appSearchBox.focus = false
+                        keyCatcher.forceActiveFocus()
+                      }
+                      event.accepted = true
+                      return
+                    }
+                    if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
+                      appSearchBox.focus = false
+                      keyCatcher.forceActiveFocus()
+                      root.selectedIndex = 0
+                      event.accepted = true
+                      return
+                    }
+                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                      if (root.searchFilteredApps.length > 0) {
+                        root.launchApp(root.searchFilteredApps[0].exec, root.targetWorkspace)
+                        root.close()
+                      }
+                      event.accepted = true
+                      return
+                    }
+                  }
 
                   Text {
                     textFormat: Text.PlainText
@@ -1061,15 +1146,16 @@ Panel {
               BorderSurface {
                 id: appSearchRow
                 required property var modelData
-                readonly property bool isSelected: Boolean(root.pickedApp && (root.pickedApp.id === appSearchRow.modelData.id || root.pickedApp.name === appSearchRow.modelData.name))
+                required property int index
+                readonly property bool isSelected: (root.selectedIndex === index) || Boolean(root.pickedApp && (root.pickedApp.id === appSearchRow.modelData.id || root.pickedApp.name === appSearchRow.modelData.name))
 
                 width: parent.width
                 implicitHeight: Style.space(38)
                 radius: Style.cornerRadius
                 color: appSearchRow.isSelected
-                  ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.15)
+                  ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.16)
                   : (appSearchHover.hovered ? Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.08) : Style.hoverFillFor(root.contentForeground, root.contentForeground))
-                borderSpec: Border.controlSpec(appSearchRow.isSelected ? "selected" : "normal", appSearchRow.isSelected ? Color.accent : Qt.darker(root.contentForeground, 2.2), Color.accent)
+                borderSpec: Border.controlSpec(appSearchRow.isSelected ? "focus" : "normal", appSearchRow.isSelected ? Color.accent : Qt.darker(root.contentForeground, 2.2), Color.accent)
 
                 HoverHandler { id: appSearchHover }
 

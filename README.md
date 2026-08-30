@@ -38,11 +38,14 @@ Declaratively pin applications to Hyprland workspaces and auto-launch them at bo
 |---|---|
 | `1` | Switch to Live Workspaces tab |
 | `2` | Switch to Pinned Rules tab |
-| `3` | Switch to Add / Search Apps tab |
+| `3` | Switch to Add / Search Apps tab (focuses search box) |
+| `Up` / `Down` or `k` / `j` | Navigate items and scroll list |
+| `Enter` / `Space` | Switch to workspace, toggle boot rule, or launch selected app |
+| `x` / `Delete` | Remove selected rule in Rules tab |
 | `p` / `P` | Pin current open window layout |
-| `m` / `M` | Reposition open windows now |
+| `m` / `M` / `a` | Reposition open windows now to assigned workspaces |
 | `r` / `R` | Sync rules and reload Hyprland |
-| `Esc` | Close flyout |
+| `Esc` | Clear search focus or close flyout |
 
 ---
 

@@ -72,4 +72,4 @@ Rules are managed in the UI and stored in `~/.config/omarchy/launchpad.json`:
 
 ## License
 
-MIT License (c) 2026 Kiryuuki
+Source-Available Non-Commercial License (PolyForm Noncommercial 1.0.0). Free for personal, educational, and homelab use. Commercial sale, distribution for fee, or commercial re-licensing is prohibited without author permission.

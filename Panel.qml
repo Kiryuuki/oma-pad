@@ -1118,9 +1118,9 @@ Panel {
                       cursorShape: Qt.PointingHandCursor
                       onClicked: {
                         if (!root.pickedApp) return
-                        var m = root.pickedApp.match || root.pickedApp.id
+                        var m = root.pickedApp.wmClass || root.pickedApp.id || root.pickedApp.name
                         var name = root.pickedApp.name || m
-                        var cmd = root.pickedApp.command || m
+                        var cmd = root.pickedApp.exec || root.pickedApp.command || m
                         root.pinWindow(m, name, root.targetWorkspace, root.flagLaunchAtBoot, cmd)
                         root.pickedApp = null
                         root.activeTab = "workspaces"
@@ -1185,7 +1185,7 @@ Panel {
 
                   Text {
                     textFormat: Text.PlainText
-                    text: "match: " + (appSearchRow.modelData.match || "")
+                    text: "class: " + (appSearchRow.modelData.wmClass || appSearchRow.modelData.id || "")
                     color: Qt.darker(root.contentForeground, 1.8)
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.caption

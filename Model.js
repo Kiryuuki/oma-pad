@@ -34,12 +34,13 @@ function parseState(rawText) {
 function filterApps(appsList, query) {
   if (!Array.isArray(appsList)) return [];
   var q = (query || "").toLowerCase().trim();
-  if (!q) return appsList.slice(0, 30);
+  if (!q) return appsList.slice(0, 40);
   return appsList.filter(function(a) {
     if (!a) return false;
     var name = (a.name || "").toLowerCase();
-    var match = (a.match || "").toLowerCase();
-    var cmd = (a.command || "").toLowerCase();
-    return name.indexOf(q) !== -1 || match.indexOf(q) !== -1 || cmd.indexOf(q) !== -1;
-  }).slice(0, 40);
+    var match = (a.match || a.wmClass || a.id || "").toLowerCase();
+    var cmd = (a.exec || a.command || "").toLowerCase();
+    var comment = (a.comment || "").toLowerCase();
+    return name.indexOf(q) !== -1 || match.indexOf(q) !== -1 || cmd.indexOf(q) !== -1 || comment.indexOf(q) !== -1;
+  }).slice(0, 50);
 }

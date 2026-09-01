@@ -185,7 +185,8 @@ def get_installed_applications():
         for desktop_file in sp.glob("*.desktop"):
             try:
                 cp = configparser.RawConfigParser(interpolation=None)
-                cp.read(desktop_file, encoding="utf-8", errors="ignore")
+                with open(desktop_file, "r", encoding="utf-8", errors="ignore") as f:
+                    cp.read_file(f)
                 if not cp.has_section("Desktop Entry"):
                     continue
 
@@ -243,16 +244,19 @@ def sync_state():
     return state
 
 
-def add_pin(name, match, workspace, launch_at_boot=False, silent=False):
+def add_pin(name, match, workspace, launch_at_boot=False, silent=False, command=""):
     cfg = load_config()
     entries = cfg.get("entries", [])
 
     match_clean = str(match).strip()
+    cmd_clean = str(command).strip() if command else match_clean
     entries = [e for e in entries if str(e.get("match", "")).strip().lower() != match_clean.lower()]
 
     entries.append({
+        "id": str(name).strip() or match_clean,
         "name": str(name).strip() or match_clean,
         "match": match_clean,
+        "command": cmd_clean,
         "workspace": int(workspace),
         "launchAtBoot": bool(launch_at_boot),
         "silent": bool(silent)
@@ -322,23 +326,75 @@ def main():
     parser = argparse.ArgumentParser(description="OmaPad Engine")
     parser.add_argument("--sync", action="store_true", help="Sync state and live Hyprland windows")
     parser.add_argument("--add", action="store_true", help="Add or update a pinned rule")
+    parser.add_argument("--pin-window", action="store_true", help="Pin window from live workspace")
+    parser.add_argument("--pin-current-windows", action="store_true", help="Pin all currently open windows")
+    parser.add_argument("--toggle-boot", type=str, help="Toggle boot for match")
+    parser.add_argument("--set-workspace", type=str, help="Set workspace for match")
+    parser.add_argument("--delete-rule", type=str, help="Delete rule for match")
     parser.add_argument("--remove", action="store_true", help="Remove a pinned rule")
     parser.add_argument("--update", action="store_true", help="Update existing pinned rule properties")
     parser.add_argument("--apply-now", action="store_true", help="Dispatch running windows to workspaces")
     parser.add_argument("--name", default="")
+    parser.add_argument("--class-name", default="")
+    parser.add_argument("--app-title", default="")
     parser.add_argument("--match", default="")
+    parser.add_argument("--command", default="")
     parser.add_argument("--workspace", type=int, default=1)
     parser.add_argument("--launch-at-boot", action="store_true")
     parser.add_argument("--silent", action="store_true")
     parser.add_argument("--boot-toggle", default="")
     args = parser.parse_args()
 
-    if args.add:
-        res = add_pin(args.name, args.match, args.workspace, args.launch_at_boot, args.silent)
+    if args.pin_window or args.add:
+        m = args.match or args.class_name
+        n = args.name or args.app_title or m
+        cmd = args.command or m
+        res = add_pin(n, m, args.workspace, args.launch_at_boot, args.silent, cmd)
         print(json.dumps(res))
-    elif args.remove:
-        res = remove_pin(args.match)
+    elif args.toggle_boot:
+        cfg = load_config()
+        entries = cfg.get("entries", [])
+        m_lower = args.toggle_boot.strip().lower()
+        for e in entries:
+            if str(e.get("match", "")).strip().lower() == m_lower:
+                e["launchAtBoot"] = not bool(e.get("launchAtBoot", False))
+                break
+        cfg["entries"] = entries
+        write_config(cfg)
+        if GENERATOR_PATH.exists():
+            run_bounded_subprocess(["python3", str(GENERATOR_PATH)], timeout=3)
+        sync_state()
+    elif args.set_workspace:
+        res = update_pin(args.set_workspace, workspace=args.workspace)
         print(json.dumps(res))
+    elif args.delete_rule or args.remove:
+        target_m = args.delete_rule or args.match
+        res = remove_pin(target_m)
+        print(json.dumps(res))
+    elif args.pin_current_windows:
+        cfg = load_config()
+        entries = cfg.get("entries", [])
+        ws_data, clients = get_live_hyprland_state(entries)
+        existing_matches = {str(e.get("match", "")).lower() for e in entries}
+        for c in clients:
+            cls = str(c.get("class", "")).strip()
+            ws = c.get("workspace", {}).get("id", 1)
+            if cls and cls.lower() not in existing_matches:
+                entries.append({
+                    "id": cls,
+                    "name": cls,
+                    "match": cls,
+                    "command": cls.lower(),
+                    "workspace": ws,
+                    "launchAtBoot": False,
+                    "silent": False
+                })
+                existing_matches.add(cls.lower())
+        cfg["entries"] = entries
+        write_config(cfg)
+        if GENERATOR_PATH.exists():
+            run_bounded_subprocess(["python3", str(GENERATOR_PATH)], timeout=3)
+        sync_state()
     elif args.update:
         b_val = None
         if args.boot_toggle:

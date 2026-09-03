@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -37,7 +38,9 @@ def launch(cmd_or_id, target_ws=None):
         if is_desktop:
             subprocess.Popen(["gtk-launch", desktop_name], start_new_session=True)
         else:
-            subprocess.Popen(cmd, shell=True, start_new_session=True)
+            args = shlex.split(cmd)
+            if args:
+                subprocess.Popen(args, start_new_session=True)
     except Exception as e:
         print(f"Error launching {cmd}: {e}", file=sys.stderr)
 

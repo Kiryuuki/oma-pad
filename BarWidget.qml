@@ -41,6 +41,19 @@ BarWidget {
     if (panelLoader.item && panelLoader.item.closeForPopoutSwitch) panelLoader.item.closeForPopoutSwitch()
   }
 
+  Process {
+    id: bootCheckProcess
+    command: ["/usr/bin/python3", (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/kiryuuki.oma-pad/scripts/launchpad_engine.py", "--ensure-boot"]
+  }
+
+  Timer {
+    id: bootCheckTimer
+    interval: 1500
+    running: true
+    repeat: false
+    onTriggered: bootCheckProcess.running = true
+  }
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 

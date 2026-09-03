@@ -225,6 +225,45 @@ def get_installed_applications():
     return sorted_apps[:250]
 
 
+def ensure_boot_apps_launched():
+    """Checks if pinned boot applications are already running; launches missing ones safely into their assigned workspaces."""
+    cfg = load_config()
+    entries = cfg.get("entries", [])
+    boot_entries = [e for e in entries if e.get("launchAtBoot")]
+    if not boot_entries:
+        return
+
+    out = run_bounded_subprocess(["hyprctl", "clients", "-j"], timeout=3)
+    if not out:
+        return
+
+    try:
+        clients = json.loads(out)
+    except Exception:
+        return
+
+    running_classes = {str(c.get("class", "")).strip().lower() for c in clients}
+    running_titles = {str(c.get("title", "")).strip().lower() for c in clients}
+
+    launch_helper_path = Path(__file__).parent / "launch_helper.py"
+
+    for b in boot_entries:
+        match = str(b.get("match", "")).strip().lower()
+        cmd = str(b.get("command") or match).strip()
+        ws = b.get("workspace", 1)
+
+        is_running = any((match in cls or cls in match) for cls in running_classes if cls)
+        if not is_running:
+            print(f"[OmaPad Boot Watcher] App '{match}' not running. Launching via: {cmd} (WS {ws})")
+            try:
+                subprocess.Popen(
+                    ["/usr/bin/python3", str(launch_helper_path), cmd, str(ws)],
+                    start_new_session=True
+                )
+            except Exception as e:
+                print(f"[OmaPad Boot Watcher] Error launching {cmd}: {e}", file=sys.stderr)
+
+
 def sync_state():
     cfg = load_config()
     pinned_entries = cfg.get("entries", [])
@@ -325,6 +364,7 @@ def update_pin(match, workspace=None, launch_at_boot=None, silent=None):
 def main():
     parser = argparse.ArgumentParser(description="OmaPad Engine")
     parser.add_argument("--sync", action="store_true", help="Sync state and live Hyprland windows")
+    parser.add_argument("--ensure-boot", action="store_true", help="Check and launch unstarted boot pinned apps")
     parser.add_argument("--add", action="store_true", help="Add or update a pinned rule")
     parser.add_argument("--pin-window", action="store_true", help="Pin window from live workspace")
     parser.add_argument("--pin-current-windows", action="store_true", help="Pin all currently open windows")
@@ -401,6 +441,9 @@ def main():
             b_val = args.boot_toggle.lower() in ("true", "1", "yes")
         res = update_pin(args.match, args.workspace if args.workspace else None, b_val, None)
         print(json.dumps(res))
+    elif args.ensure_boot:
+        ensure_boot_apps_launched()
+        sync_state()
     elif args.apply_now:
         if APPLY_NOW_PATH.exists():
             run_bounded_subprocess(["python3", str(APPLY_NOW_PATH)], timeout=5)

@@ -226,7 +226,15 @@ def get_installed_applications():
 
 
 def ensure_boot_apps_launched():
-    """Checks if pinned boot applications are already running; launches missing ones safely into their assigned workspaces."""
+    """Checks if pinned boot applications are already running; launches missing ones safely into their assigned workspaces.
+
+    Uses gtk-launch for desktop entries to avoid executing raw Exec= values.
+    Non-desktop commands are validated for safe characters before argv-based launch.
+    """
+    import re
+
+    _SAFE_CMD_RE = re.compile(r'^[a-zA-Z0-9_./@:~=,+ -]+$')
+
     cfg = load_config()
     entries = cfg.get("entries", [])
     boot_entries = [e for e in entries if e.get("launchAtBoot")]
@@ -243,7 +251,13 @@ def ensure_boot_apps_launched():
         return
 
     running_classes = {str(c.get("class", "")).strip().lower() for c in clients}
-    running_titles = {str(c.get("title", "")).strip().lower() for c in clients}
+
+    # Build desktop-entry lookup
+    desktop_stems = {}
+    for app_dir in [Path("/usr/share/applications"), Path.home() / ".local" / "share" / "applications"]:
+        if app_dir.exists():
+            for df in app_dir.glob("*.desktop"):
+                desktop_stems[df.stem.lower()] = df.stem
 
     launch_helper_path = Path(__file__).parent / "launch_helper.py"
 
@@ -254,14 +268,28 @@ def ensure_boot_apps_launched():
 
         is_running = any((match in cls or cls in match) for cls in running_classes if cls)
         if not is_running:
-            print(f"[OmaPad Boot Watcher] App '{match}' not running. Launching via: {cmd} (WS {ws})")
-            try:
-                subprocess.Popen(
-                    ["/usr/bin/python3", str(launch_helper_path), cmd, str(ws)],
-                    start_new_session=True
-                )
-            except Exception as e:
-                print(f"[OmaPad Boot Watcher] Error launching {cmd}: {e}", file=sys.stderr)
+            # Prefer gtk-launch for desktop entries
+            desktop_stem = desktop_stems.get(cmd.lower())
+            if desktop_stem:
+                print(f"[OmaPad Boot Watcher] App '{match}' not running. gtk-launching: {desktop_stem} (WS {ws})")
+                try:
+                    subprocess.Popen(
+                        ["gtk-launch", desktop_stem],
+                        start_new_session=True
+                    )
+                except Exception as e:
+                    print(f"[OmaPad Boot Watcher] Error gtk-launching {desktop_stem}: {e}", file=sys.stderr)
+            elif _SAFE_CMD_RE.match(cmd):
+                print(f"[OmaPad Boot Watcher] App '{match}' not running. Launching via helper: {cmd} (WS {ws})")
+                try:
+                    subprocess.Popen(
+                        ["/usr/bin/python3", str(launch_helper_path), cmd, str(ws)],
+                        start_new_session=True
+                    )
+                except Exception as e:
+                    print(f"[OmaPad Boot Watcher] Error launching {cmd}: {e}", file=sys.stderr)
+            else:
+                print(f"[OmaPad Boot Watcher] Refusing to launch command with unsafe characters: {cmd!r}", file=sys.stderr)
 
 
 def sync_state():
